@@ -24,6 +24,7 @@ export class Agent {
   private readonly toolMap: Map<string, StructuredToolInterface>;
   private readonly systemPrompt: string;
   private readonly signal?: AbortSignal;
+  private readonly apiKeys?: Record<string, string>;
 
   private constructor(
     config: AgentConfig,
@@ -37,6 +38,7 @@ export class Agent {
     this.toolMap = new Map(tools.map(t => [t.name, t]));
     this.systemPrompt = systemPrompt;
     this.signal = config.signal;
+    this.apiKeys = config.apiKeys;
   }
 
   /**
@@ -44,7 +46,7 @@ export class Agent {
    */
   static create(config: AgentConfig = {}): Agent {
     const model = config.model ?? 'gpt-5.2';
-    const tools = getTools(model);
+    const tools = getTools(model, config.apiKeys);
     const systemPrompt = buildSystemPrompt(model);
     return new Agent(config, tools, systemPrompt);
   }
@@ -61,17 +63,22 @@ export class Agent {
 
     // Create scratchpad for this query - single source of truth for all work done
     const scratchpad = new Scratchpad(query);
-    
+
     // Build initial prompt with conversation history context
     let currentPrompt = this.buildInitialPrompt(query, inMemoryHistory);
-    
+
     let iteration = 0;
 
     // Main agent loop
     while (iteration < this.maxIterations) {
       iteration++;
 
+      // Yield thinking event immediately
+      yield { type: 'thinking', message: iteration === 1 ? 'Analyzing your request...' : 'Analyzing tool results...' };
+
+      console.log(`[Agent] Iteration ${iteration}: Calling model...`);
       const response = await this.callModel(currentPrompt);
+      console.log(`[Agent] Model responded. Tool calls: ${response.tool_calls?.length || 0}`);
       const responseText = extractTextContent(response);
 
       // Emit thinking if there are also tool calls
@@ -94,14 +101,14 @@ export class Agent {
         // Stream final answer with full context from scratchpad
         const answerGenerator = this.generateFinalAnswer(query, scratchpad);
         let fullAnswer = '';
-        
+
         for await (const event of answerGenerator) {
           yield event;
           if (event.type === 'answer_chunk') {
             fullAnswer += event.text;
           }
         }
-        
+
         yield { type: 'done', answer: fullAnswer, toolCalls: scratchpad.getToolCallRecords(), iterations: iteration };
         return;
       }
@@ -115,7 +122,7 @@ export class Agent {
         yield result.value;
         result = await generator.next();
       }
-      
+
       // Build iteration prompt from scratchpad (always has full accumulated history)
       currentPrompt = buildIterationPrompt(query, scratchpad.getToolSummaries());
     }
@@ -123,14 +130,14 @@ export class Agent {
     // Max iterations reached - still generate proper final answer
     const answerGenerator = this.generateFinalAnswer(query, scratchpad);
     let fullAnswer = '';
-    
+
     for await (const event of answerGenerator) {
       yield event;
       if (event.type === 'answer_chunk') {
         fullAnswer += event.text;
       }
     }
-    
+
     yield {
       type: 'done',
       answer: fullAnswer || `Reached maximum iterations (${this.maxIterations}).`,
@@ -148,6 +155,7 @@ export class Agent {
       systemPrompt: this.systemPrompt,
       tools: this.tools,
       signal: this.signal,
+      apiKeys: this.apiKeys, // Pass keys down
     }) as AIMessage;
   }
 
@@ -168,6 +176,7 @@ export class Agent {
       model: getFastModel(this.modelProvider, this.model),
       systemPrompt: 'You are a concise data summarizer.',
       signal: this.signal,
+      apiKeys: this.apiKeys, // Pass keys down
     });
     return String(summary);
   }

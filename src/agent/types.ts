@@ -9,7 +9,10 @@ export interface AgentConfig {
   /** Maximum agent loop iterations (default: 10) */
   maxIterations?: number;
   /** AbortSignal for cancelling agent execution */
+  /** AbortSignal for cancelling agent execution */
   signal?: AbortSignal;
+  /** API Keys for providers (overriding env vars) */
+  apiKeys?: Record<string, string>;
 }
 
 /**

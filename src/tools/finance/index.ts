@@ -8,4 +8,6 @@ export { getSegmentedRevenues } from './segments.js';
 export { getCryptoPriceSnapshot, getCryptoPrices, getCryptoTickers } from './crypto.js';
 export { getInsiderTrades } from './insider_trades.js';
 export { createFinancialSearch } from './financial-search.js';
+export { getYahooPriceSnapshot, getYahooFundamentals, getYahooNews } from './yahoo.js';
+export { getAlphaVantagePriceSnapshot, getAlphaVantageOverview } from './alpha_vantage.js';
 

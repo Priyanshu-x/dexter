@@ -25,6 +25,16 @@ const PROVIDERS: Provider[] = [
     models: ['gemini-3-flash-preview', 'gemini-3-pro-preview'],
   },
   {
+    displayName: 'OpenRouter',
+    providerId: 'openrouter',
+    models: [
+      'openrouter/deepseek/deepseek-chat',
+      'openrouter/deepseek/deepseek-reasoner',
+      'openrouter/google/gemini-2.0-flash-001',
+      'openrouter/meta-llama/llama-3.3-70b-instruct'
+    ],
+  },
+  {
     displayName: 'xAI',
     providerId: 'xai',
     models: ['grok-4-0709', 'grok-4-1-fast-reasoning'],

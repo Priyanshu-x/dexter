@@ -44,14 +44,15 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
 // Model provider configuration
 interface ModelOpts {
   streaming: boolean;
+  apiKeys?: Record<string, string>;
 }
 
 type ModelFactory = (name: string, opts: ModelOpts) => BaseChatModel;
 
-function getApiKey(envVar: string, providerName: string): string {
-  const apiKey = process.env[envVar];
+function getApiKey(envVar: string, providerName: string, overrides?: Record<string, string>): string {
+  const apiKey = overrides?.[envVar] || process.env[envVar];
   if (!apiKey) {
-    throw new Error(`${envVar} not found in environment variables`);
+    throw new Error(`${envVar} not found in environment variables or client overrides`);
   }
   return apiKey;
 }
@@ -61,21 +62,34 @@ const MODEL_PROVIDERS: Record<string, ModelFactory> = {
     new ChatAnthropic({
       model: name,
       ...opts,
-      apiKey: getApiKey('ANTHROPIC_API_KEY', 'Anthropic'),
+      apiKey: getApiKey('ANTHROPIC_API_KEY', 'Anthropic', opts.apiKeys),
     }),
   'gemini-': (name, opts) =>
     new ChatGoogleGenerativeAI({
       model: name,
       ...opts,
-      apiKey: getApiKey('GOOGLE_API_KEY', 'Google'),
+      apiKey: getApiKey('GOOGLE_API_KEY', 'Google', opts.apiKeys),
     }),
   'grok-': (name, opts) =>
     new ChatOpenAI({
       model: name,
       ...opts,
-      apiKey: getApiKey('XAI_API_KEY', 'xAI'),
+      apiKey: getApiKey('XAI_API_KEY', 'xAI', opts.apiKeys),
       configuration: {
         baseURL: 'https://api.x.ai/v1',
+      },
+    }),
+  'openrouter/': (name, opts) =>
+    new ChatOpenAI({
+      model: name.replace(/^openrouter\//, ''),
+      ...opts,
+      apiKey: getApiKey('OPENROUTER_API_KEY', 'OpenRouter', opts.apiKeys),
+      configuration: {
+        baseURL: 'https://openrouter.ai/api/v1',
+        defaultHeaders: {
+          'HTTP-Referer': 'https://github.com/virattt/dexter',
+          'X-Title': 'Dexter',
+        },
       },
     }),
   'ollama:': (name, opts) =>
@@ -90,14 +104,15 @@ const DEFAULT_MODEL_FACTORY: ModelFactory = (name, opts) =>
   new ChatOpenAI({
     model: name,
     ...opts,
-    apiKey: process.env.OPENAI_API_KEY,
+    apiKey: opts.apiKeys?.['OPENAI_API_KEY'] || process.env.OPENAI_API_KEY,
   });
 
 export function getChatModel(
   modelName: string = DEFAULT_MODEL,
-  streaming: boolean = false
+  streaming: boolean = false,
+  apiKeys?: Record<string, string>
 ): BaseChatModel {
-  const opts: ModelOpts = { streaming };
+  const opts: ModelOpts = { streaming, apiKeys };
   const prefix = Object.keys(MODEL_PROVIDERS).find((p) => modelName.startsWith(p));
   const factory = prefix ? MODEL_PROVIDERS[prefix] : DEFAULT_MODEL_FACTORY;
   return factory(modelName, opts);
@@ -109,10 +124,11 @@ interface CallLlmOptions {
   outputSchema?: z.ZodType<unknown>;
   tools?: StructuredToolInterface[];
   signal?: AbortSignal;
+  apiKeys?: Record<string, string>;
 }
 
 export async function callLlm(prompt: string, options: CallLlmOptions = {}): Promise<unknown> {
-  const { model = DEFAULT_MODEL, systemPrompt, outputSchema, tools, signal } = options;
+  const { model = DEFAULT_MODEL, systemPrompt, outputSchema, tools, signal, apiKeys } = options;
   const finalSystemPrompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
 
   const promptTemplate = ChatPromptTemplate.fromMessages([
@@ -120,7 +136,7 @@ export async function callLlm(prompt: string, options: CallLlmOptions = {}): Pro
     ['user', '{prompt}'],
   ]);
 
-  const llm = getChatModel(model, false);
+  const llm = getChatModel(model, false, apiKeys);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let runnable: Runnable<any, any> = llm;
@@ -133,12 +149,19 @@ export async function callLlm(prompt: string, options: CallLlmOptions = {}): Pro
 
   const chain = promptTemplate.pipe(runnable);
 
-  const result = await withRetry(() => chain.invoke({ prompt }, signal ? { signal } : undefined));
-
-  // If no outputSchema and no tools, extract content from AIMessage
-  // When tools are provided, return the full AIMessage to preserve tool_calls
-  if (!outputSchema && !tools && result && typeof result === 'object' && 'content' in result) {
-    return (result as { content: string }).content;
+  console.log(`[LLM] Calling model: ${model} with tools: ${tools?.length || 0}`);
+  const start = Date.now();
+  try {
+    const result = await withRetry(() => chain.invoke({ prompt }, signal ? { signal } : undefined));
+    console.log(`[LLM] Result received in ${Date.now() - start}ms`);
+    // If no outputSchema and no tools, extract content from AIMessage
+    // When tools are provided, return the full AIMessage to preserve tool_calls
+    if (!outputSchema && !tools && result && typeof result === 'object' && 'content' in result) {
+      return (result as { content: string }).content;
+    }
+    return result;
+  } catch (e) {
+    console.error(`[LLM] Call failed after ${Date.now() - start}ms:`, e);
+    throw e;
   }
-  return result;
 }

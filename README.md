@@ -25,9 +25,11 @@ Dexter takes complex financial questions and turns them into clear, step-by-step
 ### Prerequisites
 
 - [Bun](https://bun.com) runtime (v1.0 or higher)
-- OpenAI API key (get [here](https://platform.openai.com/api-keys))
-- Financial Datasets API key (get [here](https://financialdatasets.ai))
-- Tavily API key (get [here](https://tavily.com)) - optional, for web search
+- [OpenRouter](https://openrouter.ai) API key (get [here](https://openrouter.ai/keys)) - **Recommended for multi-model access**
+- [OpenAI](https://platform.openai.com/api-keys) API key
+- [Alpha Vantage](https://www.alphavantage.co/support/#api-key) API key (Free, required for Indian market NSE/BSE data)
+- [Financial Datasets](https://financialdatasets.ai) API key
+- [Tavily](https://tavily.com) API key (optional, for web search)
 
 #### Installing Bun
 
@@ -67,6 +69,7 @@ bun install
 cp env.example .env
 
 # Edit .env and add your API keys (if using cloud providers)
+# OPENROUTER_API_KEY=your-openrouter-key
 # OPENAI_API_KEY=your-openai-api-key
 # ANTHROPIC_API_KEY=your-anthropic-api-key
 # GOOGLE_API_KEY=your-google-api-key
@@ -75,23 +78,36 @@ cp env.example .env
 # (Optional) If using Ollama locally
 # OLLAMA_BASE_URL=http://127.0.0.1:11434
 
-# Other required keys
+# Required for Indian Markets (NSE/BSE)
+# ALPHA_VANTAGE_API_KEY=your-alphavantage-key
+
+# Financial Datasets (US Stocks)
 # FINANCIAL_DATASETS_API_KEY=your-financial-datasets-api-key
+
+# Search
 # TAVILY_API_KEY=your-tavily-api-key
 ```
 
 ### Usage
 
+#### CLI Mode
 Run Dexter in interactive mode:
 ```bash
 bun start
 ```
 
-Or with watch mode for development:
+#### Web UI Mode
+Dexter features a beautiful, real-time web interface.
+
+1. Start the server:
 ```bash
-bun dev
+bun run src/server.ts
 ```
 
+2. Open your browser and navigate to:
+```
+http://localhost:3000
+```
 ## How to Contribute
 
 1. Fork the repository

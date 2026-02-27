@@ -15,6 +15,8 @@ import { getAnalystEstimates } from './estimates.js';
 import { getSegmentedRevenues } from './segments.js';
 import { getCryptoPriceSnapshot, getCryptoPrices, getCryptoTickers } from './crypto.js';
 import { getInsiderTrades } from './insider_trades.js';
+import { getYahooPriceSnapshot, getYahooFundamentals, getYahooNews } from './yahoo.js';
+import { getAlphaVantagePriceSnapshot, getAlphaVantageOverview } from './alpha_vantage.js';
 
 // All finance tools available for routing
 const FINANCE_TOOLS: StructuredToolInterface[] = [
@@ -42,6 +44,13 @@ const FINANCE_TOOLS: StructuredToolInterface[] = [
   getNews,
   getInsiderTrades,
   getSegmentedRevenues,
+  // Yahoo Finance (Indian Market)
+  getYahooPriceSnapshot,
+  getYahooFundamentals,
+  getYahooNews,
+  // Alpha Vantage (Indian Market)
+  getAlphaVantagePriceSnapshot,
+  getAlphaVantageOverview,
 ];
 
 // Create a map for quick tool lookup by name
@@ -59,6 +68,12 @@ Given a user's natural language query about financial data, call the appropriate
 1. **Ticker Resolution**: Convert company names to ticker symbols:
    - Apple → AAPL, Tesla → TSLA, Microsoft → MSFT, Amazon → AMZN
    - Google/Alphabet → GOOGL, Meta/Facebook → META, Nvidia → NVDA
+   - **INDIAN STOCKS**:
+     - For NSE stocks, append '.BSE' or '.NSE' as needed by Alpha Vantage. usually RELIANCE.BSE or RELIANCE.NSE
+     - NOTE: Alpha Vantage works best with BSE tickers for India (e.g., RELIANCE.BSE).
+     - If user asks for "Tata Motors", use "TATAMOTORS.BSE"
+     - If user asks for "Nifty 50", use "^NSEI"
+     - If user asks for "Sensex", use "^BSESN"
 
 2. **Date Inference**: Convert relative dates to YYYY-MM-DD format:
    - "last year" → start_date 1 year ago, end_date today
@@ -79,6 +94,13 @@ Given a user's natural language query about financial data, call the appropriate
    - Prefer specific tools over general ones when possible
    - Use get_all_financial_statements only when multiple statement types needed
    - For comparisons between companies, call the same tool for each ticker
+   - **Indian Market Routing**:
+     - For any ticker ending in .BSE or .NSE, or for Indian companies, ALWAYS use:
+       - get_alpha_vantage_price_snapshot (for prices)
+       - get_alpha_vantage_overview (for fundamentals)
+     - Fallback to Yahoo if Alpha Vantage fails, but prefer Alpha Vantage.
+     - DO NOT use the US-specific tools (get_filings) for Indian stocks.
+     - DO NOT use the US-specific tools (get_filings, get_income_statements etc) for Indian stocks as they will fail.
 
 Call the appropriate tool(s) now.`;
 }
@@ -92,7 +114,7 @@ const FinancialSearchInputSchema = z.object({
  * Create a financial_search tool configured with the specified model.
  * Uses native LLM tool calling for routing queries to finance tools.
  */
-export function createFinancialSearch(model: string): DynamicStructuredTool {
+export function createFinancialSearch(model: string, apiKeys?: Record<string, string>): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: 'financial_search',
     description: `Intelligent agentic search for financial data. Takes a natural language query and automatically routes to appropriate financial data tools. Use for:
@@ -111,6 +133,7 @@ export function createFinancialSearch(model: string): DynamicStructuredTool {
         model,
         systemPrompt: buildRouterPrompt(),
         tools: FINANCE_TOOLS,
+        apiKeys: apiKeys, // Pass keys down
       }) as AIMessage;
 
       // 2. Check for tool calls
