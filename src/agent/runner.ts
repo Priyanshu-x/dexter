@@ -8,7 +8,7 @@ export async function* runAgent(
     history?: InMemoryChatHistory
 ): AsyncGenerator<AgentEvent> {
     // Create agent instance
-    const agent = Agent.create(config);
+    const agent = await Agent.create(config);
 
     // Run the agent stream
     const stream = agent.run(query, history);

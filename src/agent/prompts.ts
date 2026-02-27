@@ -1,4 +1,12 @@
 import { buildToolDescriptions } from '../tools/registry.js';
+import { buildSkillMetadataSection, discoverSkills } from '../skills/index.js';
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // ============================================================================
 // Helper Functions
@@ -15,6 +23,52 @@ export function getCurrentDate(): string {
     day: 'numeric',
   };
   return new Date().toLocaleDateString('en-US', options);
+}
+
+/**
+ * Load SOUL.md content from user override or bundled file.
+ */
+export async function loadSoulDocument(): Promise<string | null> {
+  const userSoulPath = join(homedir(), '.dexter', 'SOUL.md');
+  try {
+    return await readFile(userSoulPath, 'utf-8');
+  } catch {
+    // Continue to bundled fallback when user override is missing/unreadable.
+  }
+
+  const bundledSoulPath = join(__dirname, '../../SOUL.md');
+  try {
+    return await readFile(bundledSoulPath, 'utf-8');
+  } catch {
+    // SOUL.md is optional; keep prompt behavior unchanged when absent.
+  }
+
+  return null;
+}
+
+/**
+ * Build the skills section for the system prompt.
+ * Only includes skill metadata if skills are available.
+ */
+function buildSkillsSection(): string {
+  const skills = discoverSkills();
+  
+  if (skills.length === 0) {
+    return '';
+  }
+
+  const skillList = buildSkillMetadataSection();
+  
+  return `## Available Skills
+
+${skillList}
+
+## Skill Usage Policy
+
+- Check if available skills can help complete the task more effectively
+- When a skill is relevant, invoke it IMMEDIATELY as your first action
+- Skills provide specialized workflows for complex tasks (e.g., DCF valuation)
+- Do not invoke a skill that has already been invoked for the current query`;
 }
 
 // ============================================================================
@@ -40,26 +94,28 @@ Your output is displayed on a command line interface. Keep responses short and c
 
 - Keep responses brief and direct
 - For non-comparative information, prefer plain text or simple lists over tables
-- Do not use markdown text formatting (no **bold**, *italics*, headers) - use plain text, lists, and box-drawing tables
+- Do not use markdown headers or *italics* - use **bold** sparingly for emphasis
 
 ## Tables (for comparative/tabular data)
 
-Tables render in a terminal with limited width. Keep them compact and scannable.
+Use markdown tables. They will be rendered as formatted box tables.
 
-Structure:
-- Max 4-6 columns per table; prefer multiple small focused tables over one wide table
-- Single-entity data: use vertical layout (metrics as rows)
-- Multi-entity comparison: use horizontal layout (entities as columns)
-- One concept per table; don't mix unrelated metrics
+STRICT FORMAT - each row must:
+- Start with | and end with |
+- Have no trailing spaces after the final |
+- Use |---| separator (with optional : for alignment)
 
-Column headers and cell values must be short:
+| Ticker | Rev    | OM  |
+|--------|--------|-----|
+| AAPL   | 416.2B | 31% |
+
+Keep tables compact:
+- Max 2-3 columns; prefer multiple small tables over one wide table
+- Headers: 1-3 words max. "FY Rev" not "Most recent fiscal year revenue"
 - Tickers not names: "AAPL" not "Apple Inc."
-- Abbreviate metrics: Rev, Op Inc, Net Inc, OCF, FCF, GM, OM, EPS, Mkt Cap
-- Dates compact: "Q4 FY25" or "TTM" not "2025-09-27"
+- Abbreviate: Rev, Op Inc, Net Inc, OCF, FCF, GM, OM, EPS
 - Numbers compact: 102.5B not $102,466,000,000
-- Omit units in cells if header includes them: header "Rev ($B)" → cell "102.5"
-- Percentages: "31%" not "31.24%" unless precision matters
-- No redundant columns (don't repeat company name in every row if obvious from context)`;
+- Omit units in cells if header has them`;
 
 // ============================================================================
 // System Prompt
@@ -69,7 +125,7 @@ Column headers and cell values must be short:
  * Build the system prompt for the agent.
  * @param model - The model name (used to get appropriate tool descriptions)
  */
-export function buildSystemPrompt(model: string): string {
+export function buildSystemPrompt(model: string, soulContent?: string | null): string {
   const toolDescriptions = buildToolDescriptions(model);
 
   return `You are Dexter, a CLI assistant with access to research tools.
@@ -85,10 +141,16 @@ ${toolDescriptions}
 ## Tool Usage Policy
 
 - Only use tools when the query actually requires external data
-- ALWAYS prefer financial_search over web_search for any financial data (prices, metrics, filings, etc.)
+- For stock prices, financials, metrics, estimates, insider trades, and company news headlines, use financial_search
 - Call financial_search ONCE with the full natural language query - it handles multi-company/multi-metric requests internally
 - Do NOT break up queries into multiple tool calls when one call can handle the request
-- If a query can be answered from general knowledge, respond directly without using tools
+- When news headlines are returned, assess whether the titles and metadata already answer the user's question before fetching full articles with web_fetch (fetching is expensive). Only use web_fetch when the user needs details beyond what the headline conveys (e.g., quotes, specifics of a deal, earnings call takeaways)
+- For general web queries, historical price charts, or non-financial topics, use web_search
+- Only use browser when you need JavaScript rendering or interactive navigation (clicking links, filling forms, navigating SPAs)
+- For factual questions about entities (companies, people, organizations), use tools to verify current state
+- Only respond directly for: conceptual definitions, stable historical facts, or conversational queries
+
+${buildSkillsSection()}
 
 ## Behavior
 
@@ -96,6 +158,15 @@ ${toolDescriptions}
 - Use professional, objective tone without excessive praise or emotional validation
 - For research tasks, be thorough but efficient
 - Avoid over-engineering responses - match the scope of your answer to the question
+- Never ask users to provide raw data, paste values, or reference JSON/API internals - users ask questions, they don't have access to financial APIs
+- If data is incomplete, answer with what you have without exposing implementation details
+
+${soulContent ? `## Identity
+
+${soulContent}
+
+Embody the identity and investing philosophy described above. Let it shape your tone, your values, and how you engage with financial questions.
+` : ''}
 
 ## Response Format
 
@@ -103,26 +174,28 @@ ${toolDescriptions}
 - For research: lead with the key finding and include specific data points
 - For non-comparative information, prefer plain text or simple lists over tables
 - Don't narrate your actions or ask leading questions about what the user wants
-- Do not use markdown text formatting (no **bold**, *italics*, headers) - use plain text, lists, and box-drawing tables
+- Do not use markdown headers or *italics* - use **bold** sparingly for emphasis
 
 ## Tables (for comparative/tabular data)
 
-Tables render in a terminal with limited width. Keep them compact and scannable.
+Use markdown tables. They will be rendered as formatted box tables.
 
-Structure:
-- Max 4-6 columns per table; prefer multiple small focused tables over one wide table
-- Single-entity data: use vertical layout (metrics as rows)
-- Multi-entity comparison: use horizontal layout (entities as columns)
-- One concept per table; don't mix unrelated metrics
+STRICT FORMAT - each row must:
+- Start with | and end with |
+- Have no trailing spaces after the final |
+- Use |---| separator (with optional : for alignment)
 
-Column headers and cell values must be short:
+| Ticker | Rev    | OM  |
+|--------|--------|-----|
+| AAPL   | 416.2B | 31% |
+
+Keep tables compact:
+- Max 2-3 columns; prefer multiple small tables over one wide table
+- Headers: 1-3 words max. "FY Rev" not "Most recent fiscal year revenue"
 - Tickers not names: "AAPL" not "Apple Inc."
-- Abbreviate metrics: Rev, Op Inc, Net Inc, OCF, FCF, GM, OM, EPS, Mkt Cap
-- Dates compact: "Q4 FY25" or "TTM" not "2025-09-27"
+- Abbreviate: Rev, Op Inc, Net Inc, OCF, FCF, GM, OM, EPS
 - Numbers compact: 102.5B not $102,466,000,000
-- Omit units in cells if header includes them: header "Rev ($B)" → cell "102.5"
-- Percentages: "31%" not "31.24%" unless precision matters
-- No redundant columns (don't repeat company name in every row if obvious from context)`;
+- Omit units in cells if header has them`;
 }
 
 // ============================================================================
@@ -130,63 +203,37 @@ Column headers and cell values must be short:
 // ============================================================================
 
 /**
- * Build user prompt for agent iteration with tool summaries (context compaction).
- * Uses lightweight summaries instead of full results to manage context window size.
+ * Build user prompt for agent iteration with full tool results.
+ * Anthropic-style: full results in context for accurate decision-making.
+ * Context clearing happens at threshold, not inline summarization.
+ * 
+ * @param originalQuery - The user's original query
+ * @param fullToolResults - Formatted full tool results (or placeholder for cleared)
+ * @param toolUsageStatus - Optional tool usage status for graceful exit mechanism
  */
 export function buildIterationPrompt(
   originalQuery: string,
-  toolSummaries: string[]
+  fullToolResults: string,
+  toolUsageStatus?: string | null
 ): string {
-  return `Query: ${originalQuery}
+  let prompt = `Query: ${originalQuery}`;
 
-Data retrieved and work completed so far:
-${toolSummaries.join('\n')}
+  if (fullToolResults.trim()) {
+    prompt += `
 
-Review the data above. If you have sufficient information to answer the query, respond directly WITHOUT calling any tools. Only call additional tools if there are specific data gaps that prevent you from answering.`;
+Data retrieved from tool calls:
+${fullToolResults}`;
+  }
+
+  // Add tool usage status if available (graceful exit mechanism)
+  if (toolUsageStatus) {
+    prompt += `\n\n${toolUsageStatus}`;
+  }
+
+  prompt += `
+
+Continue working toward answering the query. When you have gathered sufficient data to answer, write your complete answer directly and do not call more tools. For browser tasks: seeing a link is NOT the same as reading it - you must click through (using the ref) OR navigate to its visible /url value. NEVER guess at URLs - use ONLY URLs visible in snapshots.`;
+
+  return prompt;
 }
 
-// ============================================================================
-// Final Answer Generation
-// ============================================================================
-
-/**
- * Build the prompt for final answer generation with full context data.
- * This is used after context compaction - full data is loaded from disk for the final answer.
- */
-export function buildFinalAnswerPrompt(
-  originalQuery: string,
-  fullContextData: string
-): string {
-  return `Query: ${originalQuery}
-
-Data:
-${fullContextData}
-
-Answer proportionally - match depth to the question's complexity.`;
-}
-
-// ============================================================================
-// Tool Summary Generation
-// ============================================================================
-
-/**
- * Build prompt for LLM-generated tool result summaries.
- * Used for context compaction - the LLM summarizes what it learned from each tool call.
- */
-export function buildToolSummaryPrompt(
-  originalQuery: string,
-  toolName: string,
-  toolArgs: Record<string, unknown>,
-  result: string
-): string {
-  const argsStr = Object.entries(toolArgs).map(([k, v]) => `${k}=${v}`).join(', ');
-  return `Summarize this tool result concisely.
-
-Query: ${originalQuery}
-Tool: ${toolName}(${argsStr})
-Result:
-${result}
-
-Write a 1 sentence summary of what was retrieved. Include specific values (numbers, dates) if relevant.
-Format: "[tool_call] -> [what was learned]"`;
-}

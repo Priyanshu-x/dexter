@@ -1,28 +1,39 @@
 import { DynamicStructuredTool, StructuredToolInterface } from '@langchain/core/tools';
+import type { RunnableConfig } from '@langchain/core/runnables';
 import { AIMessage, ToolCall } from '@langchain/core/messages';
 import { z } from 'zod';
 import { callLlm } from '../../model/llm.js';
 import { formatToolResult } from '../types.js';
 import { getCurrentDate } from '../../agent/prompts.js';
 
-// Import all finance tools directly (avoid circular deps with index.ts)
+/**
+ * Rich description for the financial_search tool.
+ */
+export const FINANCIAL_SEARCH_DESCRIPTION = `
+Intelligent meta-tool for financial data research. Takes a natural language query and automatically routes to appropriate financial data sources for company financials, SEC filings, analyst estimates, and more.
+`.trim();
+
+/** Format snake_case tool name to Title Case for progress messages */
+function formatSubToolName(name: string): string {
+  return name.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+// Import all finance tools directly
 import { getIncomeStatements, getBalanceSheets, getCashFlowStatements, getAllFinancialStatements } from './fundamentals.js';
-import { getFilings, get10KFilingItems, get10QFilingItems, get8KFilingItems } from './filings.js';
-import { getPriceSnapshot, getPrices } from './prices.js';
-import { getFinancialMetricsSnapshot, getFinancialMetrics } from './metrics.js';
-import { getNews } from './news.js';
+import { getKeyRatios } from './key-ratios.js';
 import { getAnalystEstimates } from './estimates.js';
 import { getSegmentedRevenues } from './segments.js';
 import { getCryptoPriceSnapshot, getCryptoPrices, getCryptoTickers } from './crypto.js';
 import { getInsiderTrades } from './insider_trades.js';
 import { getYahooPriceSnapshot, getYahooFundamentals, getYahooNews } from './yahoo.js';
 import { getAlphaVantagePriceSnapshot, getAlphaVantageOverview } from './alpha_vantage.js';
+import { getStockPrice } from './stock-price.js';
+import { getCompanyNews } from './news.js';
 
 // All finance tools available for routing
 const FINANCE_TOOLS: StructuredToolInterface[] = [
   // Price Data
-  getPriceSnapshot,
-  getPrices,
+  getStockPrice,
   getCryptoPriceSnapshot,
   getCryptoPrices,
   getCryptoTickers,
@@ -31,17 +42,12 @@ const FINANCE_TOOLS: StructuredToolInterface[] = [
   getBalanceSheets,
   getCashFlowStatements,
   getAllFinancialStatements,
-  // Metrics & Estimates
-  getFinancialMetricsSnapshot,
-  getFinancialMetrics,
+  // Key Ratios & Estimates
+  getKeyRatios,
   getAnalystEstimates,
-  // SEC Filings
-  getFilings,
-  get10KFilingItems,
-  get10QFilingItems,
-  get8KFilingItems,
+  // News
+  getCompanyNews,
   // Other Data
-  getNews,
   getInsiderTrades,
   getSegmentedRevenues,
   // Yahoo Finance (Indian Market)
@@ -56,7 +62,9 @@ const FINANCE_TOOLS: StructuredToolInterface[] = [
 // Create a map for quick tool lookup by name
 const FINANCE_TOOL_MAP = new Map(FINANCE_TOOLS.map(t => [t.name, t]));
 
-// Build the router system prompt - simplified since LLM sees tool schemas
+/**
+ * Build the router system prompt
+ */
 function buildRouterPrompt(): string {
   return `You are a financial data routing assistant.
 Current date: ${getCurrentDate()}
@@ -67,40 +75,15 @@ Given a user's natural language query about financial data, call the appropriate
 
 1. **Ticker Resolution**: Convert company names to ticker symbols:
    - Apple → AAPL, Tesla → TSLA, Microsoft → MSFT, Amazon → AMZN
-   - Google/Alphabet → GOOGL, Meta/Facebook → META, Nvidia → NVDA
-   - **INDIAN STOCKS**:
-     - For NSE stocks, append '.BSE' or '.NSE' as needed by Alpha Vantage. usually RELIANCE.BSE or RELIANCE.NSE
-     - NOTE: Alpha Vantage works best with BSE tickers for India (e.g., RELIANCE.BSE).
-     - If user asks for "Tata Motors", use "TATAMOTORS.BSE"
-     - If user asks for "Nifty 50", use "^NSEI"
-     - If user asks for "Sensex", use "^BSESN"
+   - **INDIAN STOCKS**: Use ".BSE" for Indian stocks (e.g., RELIANCE.BSE).
 
-2. **Date Inference**: Convert relative dates to YYYY-MM-DD format:
-   - "last year" → start_date 1 year ago, end_date today
-   - "last quarter" → start_date 3 months ago, end_date today
-   - "past 5 years" → start_date 5 years ago, end_date today
-   - "YTD" → start_date Jan 1 of current year, end_date today
-
-3. **Tool Selection**:
-   - For "current" or "latest" data, use snapshot tools (get_price_snapshot, get_financial_metrics_snapshot)
-   - For "historical" or "over time" data, use date-range tools
-   - For P/E ratio, market cap, valuation metrics → get_financial_metrics_snapshot
+2. **Tool Selection**:
+   - For a current stock quote/snapshot → get_stock_price
    - For revenue, earnings, profitability → get_income_statements
-   - For debt, assets, equity → get_balance_sheets
-   - For cash flow, free cash flow → get_cash_flow_statements
-   - For comprehensive analysis → get_all_financial_statements
-
-4. **Efficiency**:
-   - Prefer specific tools over general ones when possible
-   - Use get_all_financial_statements only when multiple statement types needed
-   - For comparisons between companies, call the same tool for each ticker
-   - **Indian Market Routing**:
-     - For any ticker ending in .BSE or .NSE, or for Indian companies, ALWAYS use:
-       - get_alpha_vantage_price_snapshot (for prices)
-       - get_alpha_vantage_overview (for fundamentals)
-     - Fallback to Yahoo if Alpha Vantage fails, but prefer Alpha Vantage.
-     - DO NOT use the US-specific tools (get_filings) for Indian stocks.
-     - DO NOT use the US-specific tools (get_filings, get_income_statements etc) for Indian stocks as they will fail.
+   - For news, catalysts, announcements → get_company_news
+   - **Indian Market Routing**: For any ticker ending in .BSE or .NSE, or for Indian companies, ALWAYS use:
+     - get_alpha_vantage_price_snapshot (for prices)
+     - get_alpha_vantage_overview (for fundamentals)
 
 Call the appropriate tool(s) now.`;
 }
@@ -112,37 +95,35 @@ const FinancialSearchInputSchema = z.object({
 
 /**
  * Create a financial_search tool configured with the specified model.
- * Uses native LLM tool calling for routing queries to finance tools.
  */
 export function createFinancialSearch(model: string, apiKeys?: Record<string, string>): DynamicStructuredTool {
   return new DynamicStructuredTool({
     name: 'financial_search',
-    description: `Intelligent agentic search for financial data. Takes a natural language query and automatically routes to appropriate financial data tools. Use for:
-- Stock prices (current or historical)
-- Company financials (income statements, balance sheets, cash flow)
-- Financial metrics (P/E ratio, market cap, EPS, dividend yield)
-- SEC filings (10-K, 10-Q, 8-K)
-- Analyst estimates and price targets
-- Company news
-- Insider trading activity
-- Cryptocurrency prices`,
+    description: FINANCIAL_SEARCH_DESCRIPTION,
     schema: FinancialSearchInputSchema,
-    func: async (input) => {
-      // 1. Call LLM with finance tools bound (native tool calling)
-      const response = await callLlm(input.query, {
+    func: async (input, _runManager, config?: RunnableConfig) => {
+      const onProgress = config?.metadata?.onProgress as ((msg: string) => void) | undefined;
+
+      // 1. Call LLM with finance tools bound
+      onProgress?.('Searching...');
+      const { response } = await callLlm(input.query, {
         model,
         systemPrompt: buildRouterPrompt(),
         tools: FINANCE_TOOLS,
-        apiKeys: apiKeys, // Pass keys down
-      }) as AIMessage;
+        apiKeys: apiKeys, // Propagate API keys
+      });
+
+      const aiMessage = response as AIMessage;
 
       // 2. Check for tool calls
-      const toolCalls = response.tool_calls as ToolCall[];
+      const toolCalls = aiMessage.tool_calls as ToolCall[];
       if (!toolCalls || toolCalls.length === 0) {
-        return formatToolResult({ error: 'No tools selected for query' }, []);
+        return formatToolResult({ error: 'No tools selected for query', message: typeof aiMessage.content === 'string' ? aiMessage.content : 'Router did not select tools' }, []);
       }
 
       // 3. Execute tool calls in parallel
+      const toolNames = toolCalls.map(tc => formatSubToolName(tc.name));
+      onProgress?.(`Fetching from ${toolNames.join(', ')}...`);
       const results = await Promise.all(
         toolCalls.map(async (tc) => {
           try {
@@ -150,13 +131,16 @@ export function createFinancialSearch(model: string, apiKeys?: Record<string, st
             if (!tool) {
               throw new Error(`Tool '${tc.name}' not found`);
             }
-            const rawResult = await tool.invoke(tc.args);
+
+            // Invoke the tool with merged API keys in the config
+            const config = { metadata: { apiKeys } };
+            const rawResult = await tool.invoke(tc.args, config);
             const result = typeof rawResult === 'string' ? rawResult : JSON.stringify(rawResult);
             const parsed = JSON.parse(result);
             return {
               tool: tc.name,
               args: tc.args,
-              data: parsed.data,
+              data: parsed.data || parsed, // Handle both wrapped and unwrapped results
               sourceUrls: parsed.sourceUrls || [],
               error: null,
             };
@@ -173,32 +157,21 @@ export function createFinancialSearch(model: string, apiKeys?: Record<string, st
       );
 
       // 4. Combine results
-      const successfulResults = results.filter((r) => r.error === null);
-      const failedResults = results.filter((r) => r.error !== null);
-
-      // Collect all source URLs
-      const allUrls = results.flatMap((r) => r.sourceUrls);
-
-      // Build combined data structure
       const combinedData: Record<string, unknown> = {};
+      const allUrls: string[] = [];
 
-      for (const result of successfulResults) {
-        // Use tool name as key, or tool_ticker for multiple calls to same tool
-        const ticker = (result.args as Record<string, unknown>).ticker as string | undefined;
-        const key = ticker ? `${result.tool}_${ticker}` : result.tool;
-        combinedData[key] = result.data;
+      for (const result of results) {
+        if (result.error) {
+          combinedData[`${result.tool}_error`] = result.error;
+        } else {
+          const ticker = (result.args as Record<string, unknown>).ticker as string | undefined;
+          const key = ticker ? `${result.tool}_${ticker}` : result.tool;
+          combinedData[key] = result.data;
+          allUrls.push(...result.sourceUrls);
+        }
       }
 
-      // Add errors if any
-      if (failedResults.length > 0) {
-        combinedData._errors = failedResults.map((r) => ({
-          tool: r.tool,
-          args: r.args,
-          error: r.error,
-        }));
-      }
-
-      return formatToolResult(combinedData, allUrls);
+      return formatToolResult(combinedData, Array.from(new Set(allUrls)));
     },
   });
 }

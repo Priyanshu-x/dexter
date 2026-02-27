@@ -2,11 +2,22 @@
 
 Dexter is an autonomous financial research agent that thinks, plans, and learns as it works. It performs analysis using task planning, self-reflection, and real-time market data. Think Claude Code, but built specifically for financial research.
 
+<img width="1098" height="659" alt="Screenshot 2026-01-21 at 5 25 10 PM" src="https://github.com/user-attachments/assets/3bcc3a7f-b68a-4f5e-8735-9d22196ff76e" />
 
-<img width="1098" height="659" alt="Screenshot 2026-01-21 at 5 25 10 PM" src="https://github.com/user-attachments/assets/3bcc3a7f-b68a-4f5e-8735-9d22196ff76e" />
+## Table of Contents
+
+- [👋 Overview](#-overview)
+- [✅ Prerequisites](#-prerequisites)
+- [💻 How to Install](#-how-to-install)
+- [🚀 How to Run](#-how-to-run)
+- [📊 How to Evaluate](#-how-to-evaluate)
+- [🐛 How to Debug](#-how-to-debug)
+- [📱 How to Use with WhatsApp](#-how-to-use-with-whatsapp)
+- [🤝 How to Contribute](#-how-to-contribute)
+- [📄 License](#-license)
 
 
-## Overview
+## 👋 Overview
 
 Dexter takes complex financial questions and turns them into clear, step-by-step research plans. It runs those tasks using live market data, checks its own work, and refines the results until it has a confident, data-backed answer.  
 
@@ -17,19 +28,17 @@ Dexter takes complex financial questions and turns them into clear, step-by-step
 - **Real-Time Financial Data**: Access to income statements, balance sheets, and cash flow statements
 - **Safety Features**: Built-in loop detection and step limits to prevent runaway execution
 
-[![Twitter Follow](https://img.shields.io/twitter/follow/virattt?style=social)](https://twitter.com/virattt)
+[![Twitter Follow](https://img.shields.io/twitter/follow/virattt?style=social)](https://twitter.com/virattt) [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2?style=social&logo=discord)](https://discord.gg/jpGHv2XB6T)
 
-<img width="875" height="558" alt="Screenshot 2026-01-21 at 5 22 19 PM" src="https://github.com/user-attachments/assets/72d28363-69ea-4c74-a297-dfa60aa347f7" />
+<img width="1042" height="638" alt="Screenshot 2026-02-18 at 12 21 25 PM" src="https://github.com/user-attachments/assets/2a6334f9-863f-4bd2-a56f-923e42f4711e" />
 
 
-### Prerequisites
+## ✅ Prerequisites
 
 - [Bun](https://bun.com) runtime (v1.0 or higher)
-- [OpenRouter](https://openrouter.ai) API key (get [here](https://openrouter.ai/keys)) - **Recommended for multi-model access**
-- [OpenAI](https://platform.openai.com/api-keys) API key
-- [Alpha Vantage](https://www.alphavantage.co/support/#api-key) API key (Free, required for Indian market NSE/BSE data)
-- [Financial Datasets](https://financialdatasets.ai) API key
-- [Tavily](https://tavily.com) API key (optional, for web search)
+- OpenAI API key (get [here](https://platform.openai.com/api-keys))
+- Financial Datasets API key (get [here](https://financialdatasets.ai))
+- Tavily API key (get [here](https://tavily.com)) - optional, for web search
 
 #### Installing Bun
 
@@ -50,7 +59,7 @@ After installation, restart your terminal and verify Bun is installed:
 bun --version
 ```
 
-### Installing Dexter
+## 💻 How to Install
 
 1. Clone the repository:
 ```bash
@@ -65,30 +74,29 @@ bun install
 
 3. Set up your environment variables:
 ```bash
-# Copy the example environment file (from parent directory)
+# Copy the example environment file
 cp env.example .env
 
 # Edit .env and add your API keys (if using cloud providers)
 # OPENROUTER_API_KEY=your-openrouter-key
 # OPENAI_API_KEY=your-openai-api-key
-# ANTHROPIC_API_KEY=your-anthropic-api-key
-# GOOGLE_API_KEY=your-google-api-key
-# XAI_API_KEY=your-xai-api-key
+# ANTHROPIC_API_KEY=your-anthropic-api-key (optional)
+# GOOGLE_API_KEY=your-google-api-key (optional)
+# XAI_API_KEY=your-xai-api-key (optional)
+# OPENROUTER_API_KEY=your-openrouter-api-key (optional)
+
+# Institutional-grade market data for agents; AAPL, NVDA, MSFT are free
+# FINANCIAL_DATASETS_API_KEY=your-financial-datasets-api-key
 
 # (Optional) If using Ollama locally
 # OLLAMA_BASE_URL=http://127.0.0.1:11434
 
-# Required for Indian Markets (NSE/BSE)
-# ALPHA_VANTAGE_API_KEY=your-alphavantage-key
-
-# Financial Datasets (US Stocks)
+# Other required keys
 # FINANCIAL_DATASETS_API_KEY=your-financial-datasets-api-key
-
-# Search
 # TAVILY_API_KEY=your-tavily-api-key
 ```
 
-### Usage
+## 🚀 How to Run
 
 #### CLI Mode
 Run Dexter in interactive mode:
@@ -103,11 +111,7 @@ Dexter features a beautiful, real-time web interface.
 ```bash
 bun run src/server.ts
 ```
-
-2. Open your browser and navigate to:
-```
-http://localhost:3000
-```
+Tip: use deepseek/deepseek-chat for best results
 ## How to Contribute
 
 1. Fork the repository
@@ -119,7 +123,6 @@ http://localhost:3000
 **Important**: Please keep your pull requests small and focused.  This will make it easier to review and merge.
 
 
-## License
+## 📄 License
 
 This project is licensed under the MIT License.
-
