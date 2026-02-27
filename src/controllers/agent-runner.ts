@@ -18,6 +18,8 @@ export interface RunQueryResult {
 export class AgentRunnerController {
   private historyValue: HistoryItem[] = [];
   private workingStateValue: WorkingState = { status: 'idle' };
+  private errorValue: string | null = null;
+  private pendingApprovalValue: { tool: string; args: Record<string, unknown> } | null = null;
   private agentConfig: AgentConfig;
   private readonly inMemoryChatHistory: InMemoryChatHistory;
   private readonly onChange?: ChangeListener;
